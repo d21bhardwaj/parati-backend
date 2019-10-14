@@ -1,0 +1,7 @@
+{% autoescape off %}
+Hi {{ user.name }},
+Please click on the link to confirm your registration,
+
+http://18.223.218.199:8080{% url 'core-api:activate' uidb64=uid token=token %}
+
+{% endautoescape %}
