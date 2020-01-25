@@ -1,0 +1,473 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+    <db:mysql-config name="MySQL_Configuration" host="127.0.0.1" port="3307" user="root" password="Admin@123" database="paratidb" doc:name="MySQL Configuration"/>
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <flow name="parati_loadBrands">
+        <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('brands_all_categories.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload  mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+(flatten (payload groupBy (lower $[0]) map ($ distinctBy $.Category))) map {
+	brand : $[0],
+	category : $[3]
+} filter $.category > 10]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_brands (brand_name, category_id, image_url) values (#[payload.brand], #[payload.category], ' ')]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadProduct">
+        <poll doc:name="Poll">
+            <fixed-frequency-scheduler frequency="1000" timeUnit="HOURS"/>
+            <logger level="INFO" doc:name="Logger"/>
+        </poll>
+        <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/scrape_data/'),new org.apache.commons.io.filefilter.RegexFileFilter('men-tShirts.txt'),null)]" doc:name="Copy_of_List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Copy_of_Set Payload"/>
+        <flow-ref name="product_data" doc:name="product_data"/>
+        <dw:transform-message doc:name="Copy_of_Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv">
+                <dw:reader-property name="separator" value="|"/>
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%function getBrandId(value)
+(flowVars.brands filter ((lower $.brand_name)==(lower value)))[0].id
+%function getColorId(value)
+(flowVars.colors filter ((lower value) contains (lower $.color)))[0].id default (flowVars.colors filter ($.color == 'multicoloured'))[0].id
+%function getDesignId(value)
+(flowVars.designs filter ((lower (trim value)) contains (lower $.design)))[0].id
+%function getNumber(value)
+value map ((trim $)[1 to ($$-2)] as :number {format : ""})
+%function checkNum(value)
+value as :number default 0
+---
+ (flatten ((payload filter $[6] != 'null')  map (value,index) -> flatten {
+	'$index' : 
+	{
+		product_id : index+1,
+		platform_id : 1,
+		name : (value[3] splitBy 'Size')[0] replace value[5] with '',
+		price : (value[6] as :number) when (checkNum(value[6]) != 0) otherwise ((value[6] splitBy '-')[0][1..-1] replace '\,' with '') as :number {format : ''} as :string as :number when (value[6] contains '-') otherwise (value[6] splitBy ' ')[1] as :number when value[6] contains 'Rs.' otherwise (value[6] replace '\,' with '') as :number {format : ""} as :string as :number,
+		link : value[4],
+		category_id : 1,
+		design_id : getDesignId((lookup("json_to_object", value[13])[(lookup("json_to_object", value[12]).attributes_name find 'Print or Pattern Type')[0]]).attribute_value),
+		brand_id : getBrandId(value[5]),
+		color_id : getColorId(lookup("json_to_object", value[11])[0].product_details_value),
+		style_tip : value[19],
+		description : lookup("json_to_object", value[11])[0].product_details_value
+		
+	} when ((lower value[0]) == 'myntra') otherwise 
+	{
+		product_id : index+1,
+		platform_id : 4,
+		name : (value[3] splitBy 'Size')[0] replace value[5] with '',
+		price : (value[6] as :number) when (checkNum(value[6]) != 0) otherwise ((value[6] splitBy '-')[0][1..-1] replace '\,' with '') as :number {format : ''} as :string as :number when (value[6] contains '-') otherwise (value[6] splitBy ' ')[1] as :number when value[6] contains 'Rs.' otherwise (value[6] replace '\,' with '') as :number {format : ""} as :string as :number,
+		link : value[4],
+		category_id : 1,
+		design_id : getDesignId(((lookup("json_to_object", value[21]).Attributes filter (($ splitBy ':')[0] == 'Pattern'))[0] splitBy ':')[1]),
+		brand_id : getBrandId(value[5]),
+		color_id : getColorId(((lookup("json_to_object", value[21]).Attributes filter (($ splitBy ':')[0] == 'Colour'))[0] splitBy ':')[1]),
+		style_tip : ' ',
+		description : value[3]
+		
+	} when ((lower value[0]) == 'fynd') otherwise 
+	{
+		product_id : index+1,	
+		platform_id : 3,	
+		name : (value[3]),
+		price : (value[6] as :number) when (checkNum(value[6]) != 0) otherwise ((value[6] splitBy '-')[0][1..-1] replace '\,' with '') as :number {format : ''} as :string as :number when (value[6] contains '-') otherwise (value[6] splitBy ' ')[1] as :number when value[6] contains 'Rs.' otherwise (value[6] replace '\,' with '') as :number {format : ""} as :string as :number,
+		link : value[4],
+		category_id : 1,
+		design_id : getDesignId((lookup("json_to_object", value[13])[(lookup("json_to_object", value[12]).attributes_name find 'Pattern')[0]]).attributes_values),
+		brand_id : getBrandId(value[5]),
+		color_id : getColorId(value[3]),
+		style_tip : ' ',
+		description : value[3]
+		
+	} when ((lower value[0]) == 'flipkart') otherwise {}
+
+})) filter ($.price > 0) and ($.design_id != null)]]></dw:set-payload>
+            <dw:set-variable variableName="productImages"><![CDATA[%dw 1.0
+%output application/java
+---
+ flatten ((payload filter $[6] != 'null') map (value,index) -> {
+	images : ((value[25] splitBy '.jpg,') map (($ ++ '.jpg') replace '.jpg.jpg' with '.jpg') map 
+		{
+			image : $ when value[0] != 'flipkart' otherwise ($ replace '128/128' with '880/1056'),
+			product_id : flowVars.productCount.productCount[0] + index + 1
+		})
+}.images)]]></dw:set-variable>
+            <dw:set-variable variableName="productSizes"><![CDATA[%dw 1.0
+%output application/java
+---
+ flatten ((payload filter $[6] != 'null') map (value,index) -> {
+	sizes : (((value[23] splitBy ',') filter (not $ is :blank)) map 
+		{
+			size : $,
+			product_id : flowVars.productCount.productCount[0] + index + 1 
+		}) filter (sizeOf $.size)>0
+}.sizes)]]></dw:set-variable>
+            <dw:set-variable variableName="productAttributes"><![CDATA[%dw 1.0
+%output application/java
+%function getBrandId(value)
+(flowVars.brands filter ((lower $.brand_name)==(lower value)))[0].id
+%function getColorId(value)
+(flowVars.colors filter ((lower value) contains (lower $.color)))[0].id default 30
+%function getDesignId(value)
+(flowVars.designs filter ((lower $.design)==(lower (trim value))))[0].id
+%function getNumber(value)
+value map ((trim $)[1 to ($$-2)] as :number {format : ""})
+%function checkNum(value)
+value as :number default 0
+---
+ flatten ((payload filter $[6] != 'null') map (value,index) -> flatten {
+	'attribute' : 
+	flatten {
+		attributes :  lookup("json_to_object", value[12]) map {
+			name : $.attributes_name,
+			value : (lookup("json_to_object", value[13])[$$].attribute_value) when (sizeOf (lookup("json_to_object", value[13])[$$].attribute_value))<=50 otherwise (lookup("json_to_object", value[13])[$$].attribute_value)[0..49],
+			product_id : flowVars.productCount.productCount[0] + index + 1
+		}
+	
+	} when ((lower value[0]) == 'myntra') otherwise 
+	flatten {
+		attributes :  lookup("json_to_object", value[21]).Attributes default [] map {
+			name : ($ splitBy ':')[0],
+			value : ($ splitBy ':')[1] when (sizeOf (($ splitBy ':')[1]))<=50 otherwise (($ splitBy ':')[1])[0..49],
+			product_id : flowVars.productCount.productCount[0] + index + 1
+		}
+		
+	} when ((lower value[0]) == 'fynd') otherwise 
+	flatten {
+		attributes :  lookup("json_to_object", value[12]) map {
+			name : $.attributes_name,
+			value : (lookup("json_to_object", value[13])[$$].attributes_values) when (sizeOf (lookup("json_to_object", value[13])[$$].attributes_values))<=50 otherwise (lookup("json_to_object", value[13])[$$].attributes_values)[0..49],
+			product_id : flowVars.productCount.productCount[0] + index + 1
+		}
+	} when ((lower value[0]) == 'flipkart') otherwise {}
+
+})]]></dw:set-variable>
+            <dw:set-variable variableName="productCluster"><![CDATA[%dw 1.0
+%output application/java
+%function getBrandId(value)
+(flowVars.brands filter ((lower $.brand_name)==(lower value)))[0].id
+%function getColorId(value)
+(flowVars.colors filter ((lower value) contains (lower $.color)))[0].id default (flowVars.colors filter ($.color == 'multicoloured'))[0].id
+%function getDesignId(value)
+(flowVars.designs filter ((lower (trim value)) contains (lower $.design)))[0].id
+%function getNumber(value)
+value map ((trim $)[1 to ($$-2)] as :number {format : ""})
+%function checkNum(value)
+value as :number default 0
+%function getBrandCluster(value)
+(flowVars.brandCluster filter ($.brand_id==(value as :number)))[0].cluster
+%function getColorCluster(value)
+(flowVars.colorCluster filter ($.id==(value as :number)))[0].cluster
+%function getDesignCluster(value)
+(flowVars.designCluster filter ($.id==(value as :number)))[0].cluster
+---
+ (flatten ((payload filter $[6] != 'null') map (value,index) -> flatten {
+	'$index' : 
+	{
+		product_id :  index + 1,
+		category_id : 1, 
+		bcluster : getBrandCluster(getBrandId(value[5])) default 0,
+		ccluster : getColorCluster(getColorId(lookup("json_to_object", value[11])[0].product_details_value)) default 0,
+		dcluster : getDesignCluster(getDesignId((lookup("json_to_object", value[13])[(lookup("json_to_object", value[12]).attributes_name find 'Print or Pattern Type')[0]]).attribute_value)) default 0 
+		
+	} when ((lower value[0]) == 'myntra') otherwise 
+	{
+		product_id :  index + 1,
+		category_id : 1,
+		bcluster : getBrandCluster(getBrandId(value[5])) default 0,
+		ccluster : getColorCluster(getColorId(((lookup("json_to_object", value[21]).Attributes filter (($ splitBy ':')[0] == 'Colour'))[0] splitBy ':')[1])) default 0,
+		dcluster : getDesignCluster(getDesignId(((lookup("json_to_object", value[21]).Attributes filter (($ splitBy ':')[0] == 'Pattern'))[0] splitBy ':')[1])) default 0 
+		
+	} when ((lower value[0]) == 'fynd') otherwise 
+	{
+		product_id :  index + 1,
+		category_id : 1,
+		bcluster : getBrandCluster(getBrandId(value[5])) default 0,
+		ccluster : getColorCluster(getColorId(value[3])) default 0,
+		dcluster : getDesignCluster(getDesignId((lookup("json_to_object", value[13])[(lookup("json_to_object", value[12]).attributes_name find 'Pattern')[0]]).attributes_values)) default 0 
+	} when ((lower value[0]) == 'flipkart') otherwise {}
+}))  filter (($.bcluster != 0) and ($.ccluster != 0) and ($.dcluster != 0))]]></dw:set-variable>
+        </dw:transform-message>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-variable variableName="productCluster"><![CDATA[%dw 1.0
+%output application/java
+---
+(flowVars.productCluster filter using (value=$) (sizeOf (payload filter ($.product_id==value.product_id)))>0 )]]></dw:set-variable>
+        </dw:transform-message>
+        <flow-ref name="parati_loadProductCluster" doc:name="parati_loadProductCluster"/>
+<!-- 		<db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Copy_of_Database">
+            <db:parameterized-query><![CDATA[insert into userapi_product (name, price, description, status, link, brand_id, category_id, platform_id, style_tip, design_id, primary_color_id) values (#[payload.name], #[payload.price], #[payload.description], ' ', #[payload.link], #[payload.brand_id], #[payload.category_id],'1', #[payload.style_tip], #[payload.design_id], #[payload.color_id]);]]></db:parameterized-query>
+        </db:insert> -->
+        <scatter-gather doc:name="Scatter-Gather">
+            <flow-ref name="parati_loadproduct_images" doc:name="parati_loadproduct_images"/>
+            <flow-ref name="parati_loadproduct_attributes" doc:name="parati_loadproduct_attributes"/>
+            <flow-ref name="parati_loadproduct_sizes" doc:name="parati_loadproduct_sizes"/>
+        </scatter-gather>
+        <logger level="INFO" doc:name="Copy_of_Logger" message="products loaded"/>
+    </flow>
+    <flow name="json_to_object">
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+((payload replace "':'" with '":"') replace "{'" with '{"') replace "'}" with '"}']]></dw:set-payload>
+        </dw:transform-message>
+        <set-payload value="#[payload]" mimeType="application/json" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+        </dw:transform-message>
+    </flow>
+    <sub-flow name="product_data">
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.productCount]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select count(*) as productCount from userapi_product]]></db:parameterized-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.brands]" doc:name="brands">
+            <db:parameterized-query><![CDATA[select * from userapi_brands where category_id=3]]></db:parameterized-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.colors]" doc:name="colors">
+            <db:parameterized-query><![CDATA[select * from userapi_colors where category_id=3]]></db:parameterized-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.designs]" doc:name="designs">
+            <db:parameterized-query><![CDATA[select * from userapi_designs where category_id=3]]></db:parameterized-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.brandCluster]" doc:name="Database">
+            <db:dynamic-query><![CDATA[select cluster,brand_id from userapi_brandcluster where category_id=3]]></db:dynamic-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.colorCluster]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select * from userapi_colorcluster where category_id=3]]></db:parameterized-query>
+        </db:select>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.designCluster]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select * from userapi_designcluster where category_id=3]]></db:parameterized-query>
+        </db:select>
+    </sub-flow>
+    <flow name="parati_loadProductCluster">
+        <set-payload value="#[flowVars.productCluster]" doc:name="Set Payload"/>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_productcluster (brand_cluster,color_cluster,design_cluster,category_id,product_id) values (#[payload.bcluster], #[payload.ccluster], #[payload.dcluster], #[payload.category_id], #[payload.product_id])]]></db:parameterized-query>
+        </db:insert>
+        <logger message="cluster loaded" level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadproduct_images">
+        <set-payload value="#[flowVars.productImages]" doc:name="Set Payload"/>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_product_images (image_url,product_id) values (#[payload.image], #[payload.product_id]);]]></db:parameterized-query>
+        </db:insert>
+        <logger message="images loaded" level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadprefbrands">
+        <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('pref_brands.csv'),null)]" doc:name="Copy_of_List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Copy_of_Set Payload"/>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.brands]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select * from userapi_brands]]></db:parameterized-query>
+        </db:select>
+        <dw:transform-message doc:name="Copy_of_Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv">
+                <dw:reader-property name="header" value="false"/>
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%function getIdWomen(value)
+(flowVars.brands filter (((lower $.brand_name)==(lower value)) and ($.category_id>10)))[0].id
+%function getId(value)
+(flowVars.brands filter ((lower $.brand_name)==(lower value) and ($.category_id<=10)))[0].id
+---
+(payload map {
+	image : $[0],
+	brand_id : getIdWomen(((($[0] splitBy '%20')[1..-1] joinBy ' ') splitBy '.')[0]) when $[0][0]=='W' otherwise getId(((($[0] splitBy '%20')[1..-1] joinBy ' ') splitBy '.')[0]),
+	cluster : $[1]
+}) filter $.brand_id != null ]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Copy_of_Database">
+            <db:parameterized-query><![CDATA[insert into userapi_prefbrandimages (image, cluster, brand_id) values (#[payload.image], #[payload.cluster], #[payload.brand_id])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Copy_of_Logger"/>
+    </flow>
+    <flow name="parati_loadprefstyle">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('pref_images.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv">
+                <dw:reader-property name="header" value="false"/>
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%var category = {
+	"A" : "1",
+	"B" : "2",
+	"C" : "3",
+	"D" : "4",
+	"E" : "5",
+	"F" : "6"
+}
+---
+(payload map (parent) -> {
+	image : parent[0],
+	style : parent[1],
+	tcolor : category[parent[2]],
+	tdesign : category[parent[3]],
+	bcolor : category[parent[4]],
+	bdesign : category[parent[5]]
+})]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" doc:name="Database" bulkMode="true">
+            <db:parameterized-query><![CDATA[insert into userapi_prefstyleimages (image, style, tdesign_cluster, tcolor_cluster, bdesign_cluster, bcolor_cluster) values (#[payload.image], #[payload.style], #[payload.tdesign], #[payload.tcolor], #[payload.bdesign], #[payload.bcolor])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadbrand_cluster">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('Brand_cluster.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+                <db:select config-ref="MySQL_Configuration" target="#[flowVars.brandid]" doc:name="Database">
+            <db:dynamic-query><![CDATA[select * from userapi_brands]]></db:dynamic-query>
+        </db:select>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv">
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%function getId(brand,category)
+(flowVars.brandid filter (((lower $.brand_name)==(lower brand)) and (($.category_id as :number)==(category as :number))))[0].id
+---
+flatten (payload map (row) -> {
+	temp : (row[0..5] map {
+		brand_id : getId($,row[6]) default 0,
+		brand_name : $ as :string,
+		category_id: row[6],
+		cluster : $$ + 1
+	}) filter ((not ($.brand_name is :blank)) and ($.brand_id != 0))
+}.temp)]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" doc:name="Database" bulkMode="true">
+            <db:parameterized-query><![CDATA[insert into userapi_brandcluster (cluster,brand_id,category_id) values (#[payload.cluster],#[payload.brand_id],#[payload.category_id]);]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadColors">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('color_all.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%var category = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+---
+flatten (category map (cat, index) -> {
+	temp : (payload distinctBy $[0] map {
+		color : $[0],
+		category_id : index + 1
+	})
+}.temp)
+]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_colors (color, category_id) values (#[payload.color], #[payload.category_id])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadDesigns">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('design_all.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%var category = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+---
+flatten (category map (cat, index) -> {
+	temp : (payload distinctBy $[0] map {
+		design : $[0],
+		category_id : index + 1
+	})
+}.temp)]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_designs (design, category_id) values (#[payload.design], #[payload.category_id])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+        <flow-ref name="parati_loadDesignsCluster" doc:name="Flow Reference"/>
+    </flow>
+    <flow name="parati_loadDesignsCluster">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('design_cluster.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.designs]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select * from userapi_designs where category_id=1]]></db:parameterized-query>
+        </db:select>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%var category = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+%var cluster = {
+	"Abstract" : "1",
+	"Checks" : "2",
+	"Floral" : "3",
+	"Solids" : "4",
+	"Stripes" : "5",
+	"Typographic" : "6"
+}
+%function getId(value)
+(flowVars.designs filter ($.design==value))[0].id
+---
+flatten (category map (cat, index) -> {
+	temp : (payload map {
+		design_id : getId($[0]) default 0,
+		cluster : cluster[$[1]],
+		cluster_name : $[1],
+		category_id : index + 1
+	}) filter (($.design_id != 0) and ($.cluster != null))
+}.temp)]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_designcluster (design_id, category_id, cluster, cluster_name) values (#[payload.design_id], #[payload.category_id], #[payload.cluster], #[payload.cluster_name])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="parati_loadColorCluster">
+                <set-payload value="#[org.apache.commons.io.FileUtils.listFiles(new java.io.File('/Users/rkewlani/Documents/parati/'),new org.apache.commons.io.filefilter.RegexFileFilter('color_cluster.csv'),null)]" doc:name="List Files"/>
+        <set-payload value="#[payload[0]]" doc:name="Set Payload"/>
+        <db:select config-ref="MySQL_Configuration" target="#[flowVars.colors]" doc:name="Database">
+            <db:parameterized-query><![CDATA[select * from userapi_colors where category_id=1]]></db:parameterized-query>
+        </db:select>
+        <dw:transform-message doc:name="Transform Message" metadata:id="fb9f45b7-61a0-4bc2-bec9-822a3b406112">
+            <dw:input-payload doc:sample="sample_data/list_csv.csv" mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+%var category = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+%function getId(value)
+(flowVars.colors filter ($.color==value))[0].id
+---
+flatten (category map (cat, index) -> {
+	temp : (payload map {
+		color_id : getId($[0]) default 0,
+		cluster : $[1],
+		category_id : index + 1
+	}) filter $.color_id != 0
+}.temp)]]></dw:set-payload>
+        </dw:transform-message>
+        <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into userapi_colorcluster (color_id, category_id, cluster) values (#[payload.color_id], #[payload.category_id], #[payload.cluster])]]></db:parameterized-query>
+        </db:insert>
+        <logger level="INFO" doc:name="Logger"/>
+    </flow>
+</mule>

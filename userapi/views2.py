@@ -2,7 +2,7 @@
 import requests
 import pdb
 from collections import Counter
-from random import shuffle
+import csv
 
 # Django imports
 from django.shortcuts import render
@@ -124,8 +124,6 @@ class LoginView(APIView):
         
         
         try:
-
-            
             user = User.objects.get(email=email)
             #data = generate_jwt_token(user, {})
             user_serializer = UserListSerializer(user)
@@ -176,9 +174,10 @@ class ProductAPIView(generics.ListAPIView):
             user_id = request.query_params.get('user_id')
             category = Category.objects.get(id=category_id)
             feedbackProductIds = UserFeedback.objects.filter(user=user_id, feedback__gt=0).values_list('id',flat=True)
+            
 
-            # pdb.set_trace()
-            ProductScore = UserFeedback.objects.filter(user=user_id, feedback=0, category_id=category_id).exclude(id__in=feedbackProductIds).order_by('-score').values_list('product_id',flat=True)
+
+            ProductScore = UserFeedback.objects.filter(user=user_id, feedback=0, product_id__lt=maxId, product_id__gt=minId).exclude(id__in=feedbackProductIds).order_by('-score').values_list('product_id',flat=True)
             limitproduct_id = list(ProductScore)[startCount:endCount]
             products_sorted = Product.objects.filter(category_id=category_id, id__in = limitproduct_id).order_by('price')
             user_serializer = ProductListSerializer(products_sorted, many=True)
@@ -322,9 +321,9 @@ class StyleImageApi(GenericAPIView):
         try:
             gender = request.query_params.get('gender')
             if gender == 'M':
-                image = PrefStyleImages.objects.filter(id__lt=97).order_by('?')
+                image = PrefStyleImages.objects.filter(id__lt=49)
             else:
-                image = PrefStyleImages.objects.filter(id__gt=96).order_by('?')
+                image = PrefStyleImages.objects.filter(id__gt=48)
             image_serializer = StyleImageListSerializer(image, many=True)
 
             images = image_serializer.data
@@ -477,9 +476,9 @@ class BrandImageApi(GenericAPIView):
         try:
             gender = request.query_params.get('gender')
             if gender == 'M':
-                image = PrefBrandImages.objects.filter(id__lt=33)
+                image = PrefBrandImages.objects.filter(id__lt=36)
             else:
-                image = PrefBrandImages.objects.filter(id__gt=32)
+                image = PrefBrandImages.objects.filter(id__gt=35)
             image_serializer = BrandImageListSerializer(image, many=True)
 
             images = image_serializer.data
@@ -503,9 +502,14 @@ class UserPreferenceAPIView(APIView):
         try:
             # pdb.set_trace()
             serializer = UserPreferencesSerializer(data=request.data)
-            brandClusterScore = {'1' : 0,'2' : 0,'3' : 0,'4' : 0,'5' : 0, '6' : 0}
-            colorClusterScore = {'1' : 0,'2' : 0,'3' : 0,'4' : 0}
-            designClusterScore = {'1' : 0,'2' : 0,'3' : 0,'4' : 0,'5' : 0, '6' : 0}
+            brandClusterScore = {'1' : 0.17,'2' : 0.17,'3' : 0.17,'4' : 0.17,'5' : 0.17, '6' : 0.17}
+            colorClusterScore = {'1' : 0.25,'2' : 0.25,'3' : 0.25,'4' : 0.25}
+            designClusterScore = {'1' : 0.17,'2' : 0.17,'3' : 0.17,'4' : 0.17,'5' : 0.17, '6' : 0.17}
+            userBrandClusterScore = {'user_id' : request.data['user_id'], 'score_type' : "brand", 'score_cluster' : 0, 'score_value' : 0}
+            userTColorClusterScore = {'user_id' : request.data['user_id'], 'score_type' : "tcolor", 'score_cluster' : 0, 'score_value' : 0}
+            userTDesignClusterScore = {'user_id' : request.data['user_id'], 'score_type' : "tdesign", 'score_cluster' : 0, 'score_value' : 0}
+            userBColorClusterScore = {'user_id' : request.data['user_id'], 'score_type' : "bcolor", 'score_cluster' : 0, 'score_value' : 0}
+            userBDesignClusterScore = {'user_id' : request.data['user_id'], 'score_type' : "bdesign", 'score_cluster' : 0, 'score_value' : 0}
             # pdb.set_trace()
             if serializer.is_valid():
                 upref = serializer.save()
@@ -518,276 +522,122 @@ class UserPreferenceAPIView(APIView):
                 prefBrandTotalCount = prefBrandsId.count()
                 maxBrandClusters = Counter(prefBrandsId.values_list('cluster',flat=True)).most_common(1)
                 maxBrandClusterCount = maxBrandClusters[0][1]
-                # for prefBrandCluster in prefBrandClusterCounts.keys():
-                #     brandClusterScore[prefBrandCluster] = prefBrandClusterCounts[prefBrandCluster]/maxBrandClusterCount
-                
-                notSelectedCluster = { k : brandClusterScore[k] for k in set(brandClusterScore) - set(prefBrandClusterCounts) }
-                if len(notSelectedCluster) > 0:
-                    minBrandCluster = next(iter(notSelectedCluster.items()))
-                    minBrandClusterCount = minBrandCluster[1]
-                else : 
-                    minBrandCluster = Counter(prefBrandsId.values_list('cluster',flat=True)).most_common()[:-2:-1][0]
-                    minBrandClusterCount = minBrandCluster[1]
-                BrandClusterScore = []
+                for prefBrandCluster in prefBrandClusterCounts.keys():
+                    brandClusterScore[prefBrandCluster] = prefBrandClusterCounts[prefBrandCluster]/maxBrandClusterCount
                 for cluster in brandClusterScore:
-                    userBrandClusterScore = {}
-                    userBrandClusterScore['user_id'] = request.data['user_id']
-                    userBrandClusterScore['score_type'] = "brand"
                     userBrandClusterScore['score_cluster'] = int(cluster)
-                    userBrandClusterScore['score_value'] = round(0.1 + 0.9*( (prefBrandClusterCounts.get(cluster,0) - minBrandClusterCount)/(maxBrandClusterCount - minBrandClusterCount) ),2)
-                    BrandClusterScore.append(userBrandClusterScore)
-                # pdb.set_trace()
-                userClusterScoreSeralizer = UserScoreSerializer(data=BrandClusterScore, many=True)
-                if userClusterScoreSeralizer.is_valid():
-                    userClusterScoreSeralizer.save()
+                    userBrandClusterScore['score_value'] = round(brandClusterScore[cluster],2)
+                    userClusterScoreSeralizer = UserScoreSerializer(data=userBrandClusterScore)
+                    if userClusterScoreSeralizer.is_valid():
+                        userClusterScoreSeralizer.save()
 
-                # #style scores
-                # styleId = (upref_serializer.data['weekendstyles'].split(',')) + (upref_serializer.data['workstyles'].split(','))
-                # prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
-                # prefStyleTotalCount = prefStyleId.count()
+                #style scores
+                styleId = (upref_serializer.data['weekendstyles'].split(',')) + (upref_serializer.data['workstyles'].split(','))
+                prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
+                prefStyleTotalCount = prefStyleId.count()
 
                 #color score
                 #topwear
-                styleId = (upref_serializer.data['workstyles'].split(','))
-                prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
-                prefStyleTotalCount = prefStyleId.count()
-
                 prefTcolorClusterCounts = dict(Counter(prefStyleId.values_list('tcolor_cluster',flat=True)))
                 maxTcolorClusters = Counter(prefStyleId.values_list('tcolor_cluster',flat=True)).most_common(1)
                 maxTcolorClusterCount = maxTcolorClusters[0][1]
-
-                notSelectedCluster = { k : colorClusterScore[k] for k in set(colorClusterScore) - set(prefTcolorClusterCounts) }
-                if len(notSelectedCluster) > 0:
-                    minTcolorCluster = next(iter(notSelectedCluster.items()))
-                    minTcolorClusterCount = minTcolorCluster[1]
-                else : 
-                    minTcolorCluster = Counter(prefStyleId.values_list('tcolor_cluster',flat=True)).most_common()[:-2:-1][0]
-                    minTcolorClusterCount = minTcolorCluster[1]
-                ColorClusterScore = []
-                for cluster in colorClusterScore:
-                    userTColorClusterScore = {}
-                    userTColorClusterScore['user_id'] = request.data['user_id']
-                    userTColorClusterScore['score_type'] = "tcolor"
-                    userTColorClusterScore['score_cluster'] = int(cluster)
-                    userTColorClusterScore['score_value'] = round(0.1 + 0.9*( (prefTcolorClusterCounts.get(cluster,0) - minTcolorClusterCount)/(maxTcolorClusterCount - minTcolorClusterCount) ),2)
-                    ColorClusterScore.append(userTColorClusterScore)
-                # pdb.set_trace()
-                userClusterScoreSeralizer = UserScoreSerializer(data=ColorClusterScore, many=True)
-                if userClusterScoreSeralizer.is_valid():
-                    userClusterScoreSeralizer.save()
                 
-                # for prefTcolorCluster in prefTcolorClusterCounts.keys():
-                #     colorClusterScore[prefTcolorCluster] = prefTcolorClusterCounts[prefTcolorCluster]/maxTcolorClusterCount
-                # for cluster in colorClusterScore:
-                #     userTColorClusterScore['score_cluster'] = int(cluster)
-                #     userTColorClusterScore['score_value'] = round(colorClusterScore[cluster],2)
-                #     userClusterScoreSeralizer = UserScoreSerializer(data=userTColorClusterScore)
-                #     if userClusterScoreSeralizer.is_valid():
-                #         userClusterScoreSeralizer.save()
+                for prefTcolorCluster in prefTcolorClusterCounts.keys():
+                    colorClusterScore[prefTcolorCluster] = prefTcolorClusterCounts[prefTcolorCluster]/maxTcolorClusterCount
+                for cluster in colorClusterScore:
+                    userTColorClusterScore['score_cluster'] = int(cluster)
+                    userTColorClusterScore['score_value'] = round(colorClusterScore[cluster],2)
+                    userClusterScoreSeralizer = UserScoreSerializer(data=userTColorClusterScore)
+                    if userClusterScoreSeralizer.is_valid():
+                        userClusterScoreSeralizer.save()
 
                 #bottomwear
-                styleId = (upref_serializer.data['weekendstyles'].split(','))
-                prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
-                prefStyleTotalCount = prefStyleId.count()
-
                 prefBcolorClusterCounts = dict(Counter(prefStyleId.values_list('bcolor_cluster',flat=True)))
                 maxBcolorClusters = Counter(prefStyleId.values_list('bcolor_cluster',flat=True)).most_common(1)
                 maxBcolorClusterCount = maxBcolorClusters[0][1]
 
-                notSelectedCluster = { k : colorClusterScore[k] for k in set(colorClusterScore) - set(prefBcolorClusterCounts) }
-                if len(notSelectedCluster) > 0:
-                    minBcolorCluster = next(iter(notSelectedCluster.items()))
-                    minBcolorClusterCount = minBcolorCluster[1]
-                else : 
-                    minBcolorCluster = Counter(prefStyleId.values_list('bcolor_cluster',flat=True)).most_common()[:-2:-1][0]
-                    minBcolorClusterCount = minBcolorCluster[1]
-                ColorClusterScore = []
+                for prefBcolorCluster in prefBcolorClusterCounts.keys():
+                    colorClusterScore[prefBcolorCluster] = prefBcolorClusterCounts[prefBcolorCluster]/maxBcolorClusterCount
                 for cluster in colorClusterScore:
-                    userBColorClusterScore = {}
-                    userBColorClusterScore['user_id'] = request.data['user_id']
-                    userBColorClusterScore['score_type'] = "bcolor"
                     userBColorClusterScore['score_cluster'] = int(cluster)
-                    userBColorClusterScore['score_value'] = round(0.1 + 0.9*( (prefBcolorClusterCounts.get(cluster,0) - minBcolorClusterCount)/(maxBcolorClusterCount - minBcolorClusterCount) ),2)
-                    ColorClusterScore.append(userBColorClusterScore)
+                    userBColorClusterScore['score_value'] = round(colorClusterScore[cluster],2)
+                    userClusterScoreSeralizer = UserScoreSerializer(data=userBColorClusterScore)
+                    if userClusterScoreSeralizer.is_valid():
+                        userClusterScoreSeralizer.save()
                 # pdb.set_trace()
-                userClusterScoreSeralizer = UserScoreSerializer(data=ColorClusterScore, many=True)
-                if userClusterScoreSeralizer.is_valid():
-                    userClusterScoreSeralizer.save()
-
-                # for prefBcolorCluster in prefBcolorClusterCounts.keys():
-                #     colorClusterScore[prefBcolorCluster] = prefBcolorClusterCounts[prefBcolorCluster]/maxBcolorClusterCount
-                # for cluster in colorClusterScore:
-                #     userBColorClusterScore['score_cluster'] = int(cluster)
-                #     userBColorClusterScore['score_value'] = round(colorClusterScore[cluster],2)
-                #     userClusterScoreSeralizer = UserScoreSerializer(data=userBColorClusterScore)
-                #     if userClusterScoreSeralizer.is_valid():
-                #         userClusterScoreSeralizer.save()
-                # pdb.set_trace()
-
-
                 #design score
                 #topwear
-                styleId = (upref_serializer.data['workstyles'].split(','))
-                prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
-                prefStyleTotalCount = prefStyleId.count()
-
-
                 prefTdesignClusterCounts = dict(Counter(prefStyleId.values_list('tdesign_cluster',flat=True)))
                 maxTdesignClusters = Counter(prefStyleId.values_list('tdesign_cluster',flat=True)).most_common(1)
                 maxTdesignClusterCount = maxTdesignClusters[0][1]
                 
-                # for prefTdesignCluster in prefTdesignClusterCounts.keys():
-                #     designClusterScore[prefTdesignCluster] = prefTdesignClusterCounts[prefTdesignCluster]/maxTdesignClusterCount
-                # for cluster in designClusterScore:
-                #     userTDesignClusterScore['score_cluster'] = int(cluster)
-                #     userTDesignClusterScore['score_value'] = round(designClusterScore[cluster],2)
-                #     userClusterScoreSeralizer = UserScoreSerializer(data=userTDesignClusterScore)
-                #     if userClusterScoreSeralizer.is_valid():
-                #         userClusterScoreSeralizer.save()
-
-                notSelectedCluster = { k : designClusterScore[k] for k in set(designClusterScore) - set(prefTdesignClusterCounts) }
-                if len(notSelectedCluster) > 0:
-                    minTdesignCluster = next(iter(notSelectedCluster.items()))
-                    minTdesignClusterCount = minTdesignCluster[1]
-                else : 
-                    minTdesignCluster = Counter(prefStyleId.values_list('tdesign_cluster',flat=True)).most_common()[:-2:-1][0]
-                    minTdesignClusterCount = minTdesignCluster[1]
-                DesignClusterScore = []
+                for prefTdesignCluster in prefTdesignClusterCounts.keys():
+                    designClusterScore[prefTdesignCluster] = prefTdesignClusterCounts[prefTdesignCluster]/maxTdesignClusterCount
                 for cluster in designClusterScore:
-                    userTDesignClusterScore = {}
-                    userTDesignClusterScore['user_id'] = request.data['user_id']
-                    userTDesignClusterScore['score_type'] = "tdesign"
                     userTDesignClusterScore['score_cluster'] = int(cluster)
-                    userTDesignClusterScore['score_value'] = round(0.1 + 0.9*( (prefTdesignClusterCounts.get(cluster,0) - minTdesignClusterCount)/(maxTdesignClusterCount - minTdesignClusterCount) ),2)
-                    DesignClusterScore.append(userTDesignClusterScore)
+                    userTDesignClusterScore['score_value'] = round(designClusterScore[cluster],2)
+                    userClusterScoreSeralizer = UserScoreSerializer(data=userTDesignClusterScore)
+                    if userClusterScoreSeralizer.is_valid():
+                        userClusterScoreSeralizer.save()
                 # pdb.set_trace()
-                userClusterScoreSeralizer = UserScoreSerializer(data=DesignClusterScore, many=True)
-                if userClusterScoreSeralizer.is_valid():
-                    userClusterScoreSeralizer.save()
-
-                # pdb.set_trace()
-
-
                 #bottomwear
-                styleId = (upref_serializer.data['weekendstyles'].split(','))
-                prefStyleId = PrefStyleImages.objects.filter(id__in=styleId)
-                prefStyleTotalCount = prefStyleId.count()
-
-
                 prefBdesignClusterCounts = dict(Counter(prefStyleId.values_list('bdesign_cluster',flat=True)))
                 maxBdesignClusters = Counter(prefStyleId.values_list('bdesign_cluster',flat=True)).most_common(1)
-                maxBdesignClusterCount = maxBdesignClusters[0][1]
+                maxBdesignClusterCount = maxBcolorClusters[0][1]
 
-                # for prefBdesignCluster in prefBdesignClusterCounts.keys():
-                #     designClusterScore[prefBcolorCluster] = prefBdesignClusterCounts[prefBdesignCluster]/maxBdesignClusterCount
-                # for cluster in designClusterScore:
-                #     userBDesignClusterScore['score_cluster'] = int(cluster)
-                #     userBDesignClusterScore['score_value'] = round(designClusterScore[cluster],2)
-                #     userClusterScoreSeralizer = UserScoreSerializer(data=userBDesignClusterScore)
-                #     if userClusterScoreSeralizer.is_valid():
-                #         userClusterScoreSeralizer.save()
-
-                notSelectedCluster = { k : designClusterScore[k] for k in set(designClusterScore) - set(prefBdesignClusterCounts) }
-                if len(notSelectedCluster) > 0:
-                    minBdesignCluster = next(iter(notSelectedCluster.items()))
-                    minBdesignClusterCount = minBdesignCluster[1]
-                else : 
-                    minBdesignCluster = Counter(prefStyleId.values_list('bdesign_cluster',flat=True)).most_common()[:-2:-1][0]
-                    minBdesignClusterCount = minBdesignCluster[1]
-                DesignClusterScore = []
+                for prefBdesignCluster in prefBdesignClusterCounts.keys():
+                    designClusterScore[prefBcolorCluster] = prefBdesignClusterCounts[prefBdesignCluster]/maxBdesignClusterCount
                 for cluster in designClusterScore:
-                    userBDesignClusterScore = {}
-                    userBDesignClusterScore['user_id'] = request.data['user_id']
-                    userBDesignClusterScore['score_type'] = "bdesign"
                     userBDesignClusterScore['score_cluster'] = int(cluster)
-                    userBDesignClusterScore['score_value'] = round(0.1 + 0.9*( (prefBdesignClusterCounts.get(cluster,0) - minBdesignClusterCount)/(maxBdesignClusterCount - minBdesignClusterCount) ),2)
-                    DesignClusterScore.append(userBDesignClusterScore)
-                # pdb.set_trace()
-                userClusterScoreSeralizer = UserScoreSerializer(data=DesignClusterScore, many=True)
-                if userClusterScoreSeralizer.is_valid():
-                    userClusterScoreSeralizer.save()
+                    userBDesignClusterScore['score_value'] = round(designClusterScore[cluster],2)
+                    userClusterScoreSeralizer = UserScoreSerializer(data=userBDesignClusterScore)
+                    if userClusterScoreSeralizer.is_valid():
+                        userClusterScoreSeralizer.save()
 
                 
                 #product score in feedback table
                 user_id = request.data['user_id']
-                # pdb.set_trace()
-                #feedbackProductIds = UserFeedback.objects.filter(user=user_id, feedback__isnull=False).values_list('product_id',flat=True)
+                feedbackProductIds = UserFeedback.objects.filter(user=user_id, feedback__isnull=False, feedback__gt=0).values_list('product_id',flat=True)
                 gender = upref_serializer.data['gender']
-                if gender[0] == 'M':
-                    products = ProductCluster.objects.filter(category_id__lt=11) #.exclude(product_id__in=feedbackProductIds)
+                if gender == 'Male':
+                    products = ProductCluster.objects.filter(category_id__lt=11).exclude(product_id__in=feedbackProductIds)
                 else:
-                    products = ProductCluster.objects.filter(category_id__gt=10) #.exclude(product_id__in=feedbackProductIds)
-                
-                # pdb.set_trace()
-                user_score = UserScore.objects.filter(user_id=int(user_id))
-                userScore = UserScoreSerializer(user_score, many=True)
-                # final_products = ProductClusterSerializer(products, many=True)
-                product_scores =[]
-                update_product_scores =[]
-                for product in products:
-                    data={}
-                    score=0
-                    try:
-                        
-                        if ((int(product.category_id) <= 3) or ((int(product.category_id) >= 8) 
-                            and (int(product.category_id) <= 14)) or ((int(product.category_id) >= 18))):
-                            color_type = 'tcolor'
-                            design_type = 'tdesign'
-                        else:
-                            color_type = 'bcolor'
-                            design_type = 'bdesign'
-                        data['product_id'] = product.product_id
-                        data['user_id'] = user_id
-                        # data['feedback'] = 0
-                        # data['category_id'] = product.category_id
-                        # pdb.set_trace()
-                        # product_cluster = products.filter(product=product.product_id,category=product.category_id)[0]
-                        # product_cluster = (list(filter(lambda iproduct:((int(iproduct['product_id']) == product.product_id) and (int(iproduct['category_id']) == product.category_id)), final_products.data)))
-                        # brand_cluster = product_cluster[0]['brand_cluster']
-                        # color_cluster = product_cluster[0]['color_cluster']
-                        # design_cluster = product_cluster[0]['design_cluster']
-                        # pdb.set_trace()
-                        brand_cluster = product.brand_cluster
-                        color_cluster = product.color_cluster
-                        design_cluster = product.design_cluster
-                        # pdb.set_trace()
-                        score = float(list(filter(lambda score:((score['score_cluster'] == brand_cluster) and (score['score_type'] == 'brand')), userScore.data))[0]['score_value']) + float(list(filter(lambda score:((score['score_cluster'] == color_cluster) and (score['score_type'] == color_type)), userScore.data))[0]['score_value']) + float(list(filter(lambda score:((score['score_cluster'] == design_cluster) and (score['score_type'] == design_type)), userScore.data))[0]['score_value'])
-                        #score = user_score.get(score_cluster=brand_cluster, score_type='brand').score_value + user_score.get(score_cluster=color_cluster, score_type=color_type).score_value + user_score.get(score_cluster=design_cluster, score_type=design_type).score_value
-                        data['score'] = round(score,2)
-                        product_score = UserFeedback(user_id=user_id, product_id=product.product_id,feedback=0,score=score, category_id=product.category_id)
-                        # product_updated_score = UserFeedback(user_id=user_id, product_id=product.product_id, score=score, category_id=product.category_id)
-                        # product_score = UserProductScoreSerializer(data=data)
-                        # if product_score.is_valid():
-                        #     product_scores.append(product_score.data)
-                        
-                        product_scores.append(product_score)
-
-                        update_product_scores.append(data)
-                    except Exception as e:
-                        data={}
-                user_feedbacks = UserFeedback.objects.filter(user_id = user_id)
-                # pdb.set_trace()
-                product_scores = sorted(product_scores, key = lambda i: i.score)
-                if (len(user_feedbacks) > 0):
-                    user_feedbacks.delete()
-                    # UserFeedback.objects.bulk_create(product_scores)
-                    # for user_feedback in user_feedbacks :
-                    #     u_id = user_feedback.user_id
-                    #     p_id = user_feedback.product_id
-                    #     # pdb.set_trace()
-                    #     user_feedback.score = float((list(filter(lambda score:((int(score['user_id']) == u_id) and (int(score['product_id']) == p_id)), update_product_scores)))[0]['score'])
-                        
-                    # product_score = helper.bulk_update(update_product_scores, update_fields=['score'])
-                    # product_score = UserProductScoreSerializer(data=update_product_scores, many=True)
+                    products = ProductCluster.objects.filter(category_id__gt=10).exclude(product_id__in=feedbackProductIds)
+                with open("/Users/rkewlani/Documents/user_product_score/" + user_id + ".csv", "w") as file:
+                    writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    writer.writerow(['category_id','product_id','score'])
                     # pdb.set_trace()
-                    # if product_score.is_valid():
-                    #     product_score.save()
-                # else: UserFeedback.objects.bulk_create(product_scores)
+                    user_score = UserScore.objects.filter(user_id=int(user_id))
+                    product_scores =[]
+                    for product in products:
+                        data=[]
+                        try:
+                            if (int(product.category_id) <= 3):
+                                color_type = 'tcolor'
+                                design_type = 'tdesign'
+                            else:
+                                color_type = 'bcolor'
+                                design_type = 'bdesign'
+                            # data['product_id'] = product.product_id
+                            # pdb.set_trace()
+                            product_cluster = products.filter(product=product.product_id,category=product.category_id)[0]
+                            brand_cluster = product_cluster.brand_cluster
+                            color_cluster = product_cluster.color_cluster
+                            design_cluster = product_cluster.design_cluster
+                            score = user_score.get(score_cluster=brand_cluster, score_type='brand').score_value + user_score.get(score_cluster=color_cluster, score_type=color_type).score_value + user_score.get(score_cluster=design_cluster, score_type=design_type).score_value
+                            # data['score'] = score
+                            data.append(product.category_id)
+                            data.append(product.product_id)
+                            data.append(score)
+                            product_scores.append(data)
+                        except Exception as e:
+                            data=[]
+                    writer.writerows(product_scores)
 
-                UserFeedback.objects.bulk_create(product_scores)
-                
-                    
-
+                # product_score = UserProductScoreSerializer(data=product_scores, many=True)
+                # # pdb.set_trace()
+                # if product_score.is_valid():
+                #     product_score.save()
                 # pdb.set_trace()
                 # send_verification_email.delay(user.pk)
                 return Response({
