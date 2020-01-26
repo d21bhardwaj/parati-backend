@@ -20,4 +20,6 @@ import userapi.urls
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('user/', include("userapi.urls")),
+    path('login/',include("userapi.login_urls")),
+    
 ]
