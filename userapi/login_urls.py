@@ -1,7 +1,7 @@
 from django.urls import path, include, re_path 
 from django.views.generic import RedirectView
 from django.contrib.auth import views as auth_views
-from userapi import login_views 
+from userapi import login_views, web_view
     
 urlpatterns = [
 
@@ -26,4 +26,5 @@ urlpatterns = [
         auth_views.PasswordResetCompleteView.as_view(
             template_name='login/password_reset_complete.html'),
         name='password_reset_complete'),
+    path('form/',web_view.style_form, name='style-form'),
 ]

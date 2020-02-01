@@ -1,0 +1,83 @@
+{% extends 'web_form/web_base.html' %}
+{% block title %}Sign Up {% endblock %}
+
+{% block content %}
+<div class="container">
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+        <div class="projects-clean">
+        <div class="fieldWrapper">
+        {{ form.gender.errors }}
+        <label for="{{ form.gender.id_for_label }}">Gender:</label>
+        {{ form.gender }}
+        </div>
+
+        <div class="fieldWrapper">
+        {{ form.birthday.errors }}
+        <label for="{{ form.birthday.id_for_label }}">Birthday:</label>
+        {{ form.birthday }}
+        </div>
+        <div class="container align-items-center align-content-center align-self-center">
+            <h2>Work Outfit</h2>
+            <h3>{{ form.weekday_style.errors }}</h3>
+            <div class="row justify-content-center projects" 
+                style="margin-left:0px;padding-bottom:0px;margin-right:0px;">
+                {% for checkbox in form.weekday_style %}
+                    <span class="border border-dark">
+                    <label for="{{ checkbox.id_for_label }}">
+                        <div class="col-sm-6 col-lg-4 item filterDiv">
+                        <img class="img-fluid" 
+                        style="height:auto;width:auto;max-height:80px;min-width:80px;min-height:80px;max-width:80px;"
+                        src="https://storage.googleapis.com/parati/preference_images/{{ checkbox.choice_label }}"  >
+                        </div>
+                    <span class="checkbox"> {{ checkbox.tag }}</span>
+                    </label>
+                </span>  
+                {% endfor %}          
+            </div>
+            <h2>Casual outfit</h2>
+            <h3>{{ form.weekend_style.errors }}</h3>
+            <div class="row justify-content-center projects" 
+                style="margin-left:0px;padding-bottom:0px;margin-right:0px;">
+                {% for checkbox in form.weekend_style %}
+                    <span class="border border-dark">
+                    <label for="{{ checkbox.id_for_label }}">
+                        <div class="col-sm-6 col-lg-4 item filterDiv">
+                        <img class="img-fluid" 
+                        style="height:auto;width:auto;max-height:80px;min-width:80px;min-height:80px;max-width:80px;"
+                        src="https://storage.googleapis.com/parati/preference_images/{{ checkbox.choice_label }}"  >
+                    </div>
+                    <span class="checkbox">{{ checkbox.tag }}</span>
+                    </label>
+                </span>  
+                {% endfor %}          
+            </div>
+            <h2>Brand</h2>
+            <h3>{{ form.brand.errors }}</h3>
+            <div class="row justify-content-center projects" 
+                style="margin-left:0px;padding-bottom:0px;margin-right:0px;">
+                {% for checkbox in form.brand %}
+                    <span class="border border-dark">
+                    <label for="{{ checkbox.id_for_label }}">
+                        <div class="col-sm-6 col-lg-4 item filterDiv">
+                        <img class="img-fluid" 
+                        style="height:auto;width:auto;max-height:80px;min-width:80px;min-height:80px;max-width:80px;"
+                        src="https://storage.googleapis.com/parati/brand_preference_logos/{{ checkbox.choice_label }}"  >
+                    </div>
+                    <span class="checkbox">{{ checkbox.tag }}</span>
+                    </label>
+                </span>  
+                {% endfor %}          
+            </div>
+        </div>
+    </div>
+      <button type="submit" class="btn btn-primary">Create an account</button>
+    </form>
+    <div class="card-footer white text-black text-center">
+      Already have an account? <a href="{% url 'login' %}">Log in</a>
+    </div>
+</div>
+      
+          
+{% endblock %}
