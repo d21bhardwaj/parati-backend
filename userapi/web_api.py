@@ -1,7 +1,6 @@
 import requests
 import json
 
-
 def weekday_choices():
     data  = requests.get("http://34.70.184.173:8000/user/prefstyleimages/")
     data = data.json()
@@ -40,3 +39,26 @@ def brand_choices():
         choices.append(tuple(options)) 
     print(choices)
     return(choices)
+
+def string_id(varids,var):
+    stringid = []
+    for varid in varids:
+        string = var +str(varid)
+        print(string)
+        stringid.append(string)
+    string = ', '.join(stringid)
+    return (string)
+        
+def user_preferences(form):
+    request = {}
+    request["user_id"] = "4"
+    request["gender"] = form.get('gender')
+    request["dob"] = "2018-12-12"
+    request["workstyles"] = string_id(form.get('weekday_style'),"id")
+    request["weekendstyles"] = string_id(form.get('weekend_style'),"id")
+    request["brands"] = string_id(form.get('brand'),"brandid")
+    print(json.dumps(request))
+    #error
+    data = requests.api.post("http://34.70.184.173:8000/user/userpref/", json=request) 
+    print(data.json())
+    return 

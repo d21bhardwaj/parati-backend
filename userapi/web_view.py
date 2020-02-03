@@ -1,14 +1,15 @@
 from django.shortcuts import render, redirect
-from .web_form import *
+from .web_forms import *
 from .web_api import *
+import json 
+from django.core.serializers.json import DjangoJSONEncoder
 
 def style_form(request):    
     if request.method == "POST":
         form = StyleForm(request.POST)
         if form.is_valid():
             form = form.cleaned_data
-            print(form)
-            print('hi') 
+            user_preferences(form) 
         else :
             print(form.errors)   
     else :
